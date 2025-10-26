@@ -28,6 +28,7 @@ public sealed class MainSection : Section
 
 
     public PathTracer PathTracer { get; set; }
+    public bool ShouldRestartRendering { get; set; }
 
 
     public bool DebugDrawRayLines { get; set; }
@@ -46,6 +47,8 @@ public sealed class MainSection : Section
             [new RectangleObject(new Vec2f(1300, 300), new Vec2f(200, 200), Color.Green)],
             [_mouseLight]
         );
+
+        ShouldRestartRendering = true;
 
 
         DebugDrawRayLines = false;
@@ -100,17 +103,23 @@ public sealed class MainSection : Section
 
     public override void Draw(IRenderer renderer)
     {
-        var scene = PathTracer.Render(Resolution, Viewport);
-        var sprite = new Sprite(new Texture(scene));
-        sprite.Scale = Scale;
-
-        renderer.Render(sprite);
-
+        RestartRenderingIfRequested();
 
         DrawRaySources(renderer);
         DebugDraw(renderer);
 
         base.Draw(renderer);
+    }
+
+
+    private void RestartRenderingIfRequested()
+    {
+        if (!ShouldRestartRendering)
+            return;
+
+        PathTracer.RenderRestart();
+
+        ShouldRestartRendering = false;
     }
 
 

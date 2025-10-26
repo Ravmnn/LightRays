@@ -23,9 +23,6 @@ class Program
 
         App.Init(VideoMode.DesktopMode, "2D Path Tracer", settings);
 
-        EmbeddedResourceLoader.ResourcesPath = "PathTracer2D.Resources";
-        EmbeddedResourceLoader.SourceAssembly = Assembly.GetExecutingAssembly();
-
 
         App.Section = new MainSection();
 
