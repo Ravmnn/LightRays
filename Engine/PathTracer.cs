@@ -12,9 +12,6 @@ namespace LightRays.Engine;
 
 
 
-// TODO: move this to a dedicated repository and solution file
-
-
 
 public readonly record struct PixelColor(Vec2f Position, ColorRGBA Color);
 
@@ -43,8 +40,8 @@ public class PathTracer()
     public Image Render(Vec2u resolution, Vec2u viewport)
     {
         var pixels = new Color[resolution.X, resolution.Y];
-        var intersectionPoints = TraceAll();
-        var pixelColors = Colorize(intersectionPoints);
+        var intersections = TraceAll();
+        var pixelColors = PixelColorsFromIntersections(intersections);
 
         foreach (var pixelColor in pixelColors)
             RenderPixel(pixels, pixelColor, resolution, viewport);
@@ -67,6 +64,10 @@ public class PathTracer()
     }
 
 
+    private IEnumerable<PixelColor> PixelColorsFromIntersections(IEnumerable<LightRayIntersection> intersections)
+        => from intersection in intersections select new PixelColor(intersection.Point, intersection.FinalColor);
+
+
     private Vec2i MapNormalizedDeviceCoordinateToPixel(Vec2u imageResolution, Vec2f coordinate)
     {
         var unsignedCoordinate = (coordinate + new Vec2f(1, 1)) / 2;
@@ -80,36 +81,36 @@ public class PathTracer()
 
 
 
-    public IEnumerable<IntersectionPoint> TraceAll()
+    public IEnumerable<LightRayIntersection> TraceAll()
     {
-        var intersectionPoints = new List<IntersectionPoint>();
+        var intersections = new List<LightRayIntersection>();
 
         GenerateRaysFromSources();
 
         foreach (var ray in Rays)
             if (Trace(ray) is { } intersectionPoint)
-                intersectionPoints.Add(intersectionPoint);
+                intersections.Add(intersectionPoint);
 
-        return intersectionPoints;
+        return intersections;
     }
 
 
-    private IntersectionPoint? Trace(LightRay lightRay)
+    private LightRayIntersection? Trace(LightRay lightRay)
     {
-        var intersectionPoints = new List<IntersectionPoint>();
+        var intersections = new List<LightRayIntersection>();
 
         // TODO: add ray bouncing and light energy loss
         foreach (var @object in Objects)
         foreach (var segment in @object.Segments)
             if (lightRay.IntersectsSegment(segment, out var t, out var u))
-                intersectionPoints.Add(new IntersectionPoint(lightRay, segment, t, u));
+                intersections.Add(new LightRayIntersection(lightRay, segment, t, u));
 
-        if (intersectionPoints.Count == 0)
+        if (intersections.Count == 0)
             return null;
 
-        intersectionPoints = intersectionPoints.OrderBy(point => point.RayT).ToList();
+        intersections = intersections.OrderBy(point => point.RayT).ToList();
 
-        return intersectionPoints.First();
+        return intersections.First();
     }
 
 
@@ -119,28 +120,5 @@ public class PathTracer()
 
         foreach (var raySource in RaySources)
             Rays.AddRange(raySource.GenerateRays());
-    }
-
-
-
-
-    public IEnumerable<PixelColor> Colorize(IEnumerable<IntersectionPoint> points)
-    {
-        // TODO: this should not be a separated step
-        var pixelColors = new List<PixelColor>();
-
-        foreach (var point in points)
-            pixelColors.Add(new PixelColor(point.Point, CalculateColorOfIntersection(point)));
-
-        return pixelColors;
-    }
-
-
-    private NormalizedColorRGBA CalculateColorOfIntersection(IntersectionPoint point)
-    {
-        var rayColor = point.LightRay.Color;
-        var objectColor = point.Object.Material.Color;
-
-        return new NormalizedColorRGBA(rayColor * objectColor);
     }
 }

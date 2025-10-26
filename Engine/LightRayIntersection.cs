@@ -6,7 +6,7 @@ namespace LightRays.Engine;
 
 
 
-public readonly struct IntersectionPoint(LightRay lightRay, Segment segment, float t, float u)
+public readonly struct LightRayIntersection(LightRay lightRay, Segment segment, float t, float u)
 {
     public LightRay LightRay { get; init; } = lightRay;
     public Segment Segment { get; init; } = segment;
@@ -16,4 +16,7 @@ public readonly struct IntersectionPoint(LightRay lightRay, Segment segment, flo
     public float SegmentU { get; init; } = u;
 
     public Vec2f Point => LightRay.At(RayT);
+
+
+    public NormalizedColorRGBA FinalColor => LightRay.Color * Object.Material.Color;
 }
