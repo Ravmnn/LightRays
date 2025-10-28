@@ -28,6 +28,7 @@ public sealed class MainSection : Section
     public Vec2f Scale => (Vec2f)Viewport / (Vec2f)Resolution;
 
 
+    public PathTracerSampler Sampler { get; set; }
     public PathTracer PathTracer { get; set; }
     public bool ShouldRestartRendering { get; set; }
 
@@ -40,19 +41,24 @@ public sealed class MainSection : Section
 
     public MainSection()
     {
-        _mouseLight = new LightRaySource(new Vec2f(), 64);
+        _mouseLight = new LightRaySource(new Vec2f(), 1024)
+        {
+            Color = Color.Red
+        };
         _useMouseLight = true;
 
 
         PathTracer = new PathTracer(
             [new RectangleObject(new Vec2f(1300, 300), new Vec2f(200, 200), Color.White)],
-            [_mouseLight]
-        )
+            [_mouseLight, new LightRaySource(new Vec2f(700, 200), 1024, Color.Blue)]
+        );
+
+        Sampler = new PathTracerSampler(PathTracer, 32)
         {
             SampleResolution = Resolution,
-            SampleViewport = Viewport,
-            Samples = 1024
+            SampleViewport = Viewport
         };
+
 
         ShouldRestartRendering = true;
 
@@ -83,7 +89,7 @@ public sealed class MainSection : Section
     private void ProcessMouseInput(object? _, MouseButtonEventArgs args)
     {
         if (_useMouseLight && args.Button == Mouse.Button.Left)
-            PathTracer.LightSources.Add(new LightRaySource(_mouseLight.Position, _mouseLight.RayCount));
+            PathTracer.LightSources.Add(new LightRaySource(_mouseLight.Position, _mouseLight.RayCount, _mouseLight.Color));
     }
 
 
@@ -104,10 +110,10 @@ public sealed class MainSection : Section
 
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Space)
-            PathTracer.RenderingPaused = !PathTracer.RenderingPaused;
+            Sampler.RenderingPaused = !Sampler.RenderingPaused;
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Enter)
-            PathTracer.RenderRestart();
+            Sampler.RenderRestart();
 
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Q)
@@ -143,7 +149,7 @@ public sealed class MainSection : Section
         if (!ShouldRestartRendering)
             return;
 
-        PathTracer.RenderRestart();
+        Sampler.RenderRestart();
 
         ShouldRestartRendering = false;
     }
@@ -151,7 +157,7 @@ public sealed class MainSection : Section
 
     private void DrawPathTracerAccumulatedSample(IRenderer renderer)
     {
-        var texture = new Texture(PathTracer.AccumulatedSample);
+        var texture = new Texture(Sampler.AccumulatedSample);
         var sprite = new Sprite(texture) { Scale = Scale };
 
         renderer.Render(sprite);
@@ -186,12 +192,12 @@ public sealed class MainSection : Section
     private void DebugInfo(IRenderer renderer)
     {
         var stateIndicator = GetPathTracerRenderingStateStringIndicator();
-        var sampleDeltaTime = PathTracer.TimeSpentToRenderLastSample;
+        var sampleDeltaTime = Sampler.TimeSpentToRenderLastSample;
         var info =
             $"""
              Time Spent Rendering Last: {sampleDeltaTime.TotalMilliseconds:N0}ms | {(int)DeltaTime.FPSFromDeltaTime(sampleDeltaTime.TotalSeconds)} FPS
              Current Light Source Rays: {_mouseLight.RayCount}
-             Current Sample: {PathTracer.CurrentSampleCounter}/{PathTracer.Samples} {stateIndicator}
+             Current Sample: {Sampler.CurrentSampleCounter}/{Sampler.Samples} {stateIndicator}
              """;
 
         Latte.Debugging.Draw.Text(renderer, new Vec2f(), info, 12, Color.White);
@@ -200,13 +206,13 @@ public sealed class MainSection : Section
 
     private string GetPathTracerRenderingStateStringIndicator()
     {
-        if (PathTracer.RenderingPaused)
+        if (Sampler.RenderingPaused)
             return "paused";
 
-        if (PathTracer.RenderingFinished)
+        if (Sampler.RenderingFinished)
             return "finished";
 
-        if (PathTracer.RenderingCancelled)
+        if (Sampler.RenderingCancelled)
             return "cancelled";
 
         return string.Empty;

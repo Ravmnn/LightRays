@@ -9,9 +9,10 @@ namespace LightRays.Engine;
 
 
 
-public class LightRaySource(Vec2f position, int rayCount)
+public class LightRaySource(Vec2f position, int rayCount, NormalizedColorRGBA? color = null)
 {
     public Vec2f Position { get; set; } = position;
+    public NormalizedColorRGBA Color { get; set; } = color ?? SFML.Graphics.Color.White;
     public int RayCount { get; set; } = rayCount;
 
 
@@ -22,7 +23,7 @@ public class LightRaySource(Vec2f position, int rayCount)
         var rays = new List<LightRay>();
 
         for (var i = 0; i < RayCount; i++)
-            rays.Add(new LightRay(Position, RandomDirection()));
+            rays.Add(new LightRay(Position, RandomDirection(), Color));
 
         return rays;
     }
