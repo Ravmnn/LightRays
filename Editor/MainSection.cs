@@ -19,6 +19,7 @@ namespace LightRays.Editor;
 public sealed class MainSection : Section
 {
     private readonly LightRaySource _mouseLight;
+    private bool _useMouseLight;
 
 
     public Vec2u Resolution => new Vec2u(16 * 120, 9 * 120) / 2;
@@ -31,7 +32,6 @@ public sealed class MainSection : Section
     public bool ShouldRestartRendering { get; set; }
 
 
-    public bool DebugDrawRayLines { get; set; }
     public bool DebugDrawSegmentLines { get; set; }
     public bool DebugDrawInfo { get; set; }
 
@@ -40,18 +40,23 @@ public sealed class MainSection : Section
 
     public MainSection()
     {
-        _mouseLight = new LightRaySource(new Vec2f(), 512);
+        _mouseLight = new LightRaySource(new Vec2f(), 64);
+        _useMouseLight = true;
 
 
         PathTracer = new PathTracer(
-            [new RectangleObject(new Vec2f(1300, 300), new Vec2f(200, 200), Color.Green)],
+            [new RectangleObject(new Vec2f(1300, 300), new Vec2f(200, 200), Color.White)],
             [_mouseLight]
-        );
+        )
+        {
+            SampleResolution = Resolution,
+            SampleViewport = Viewport,
+            Samples = 1024
+        };
 
         ShouldRestartRendering = true;
 
 
-        DebugDrawRayLines = false;
         DebugDrawSegmentLines = false;
         DebugDrawInfo = true;
 
@@ -66,6 +71,9 @@ public sealed class MainSection : Section
     {
         _mouseLight.Position = MouseInput.PositionInView;
 
+        if (_useMouseLight && MouseInput.MouseMoved)
+            ShouldRestartRendering = true;
+
         ProcessKeyInput();
 
         base.Update();
@@ -74,20 +82,17 @@ public sealed class MainSection : Section
 
     private void ProcessMouseInput(object? _, MouseButtonEventArgs args)
     {
-        if (args.Button == Mouse.Button.Left)
-            PathTracer.RaySources.Add(new LightRaySource(_mouseLight.Position, _mouseLight.RayCount));
+        if (_useMouseLight && args.Button == Mouse.Button.Left)
+            PathTracer.LightSources.Add(new LightRaySource(_mouseLight.Position, _mouseLight.RayCount));
     }
 
 
     private void ProcessKeyInput()
     {
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Num1)
-            DebugDrawRayLines = !DebugDrawRayLines;
-
-        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Num2)
             DebugDrawSegmentLines = !DebugDrawSegmentLines;
 
-        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Num3)
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Num2)
             DebugDrawInfo = !DebugDrawInfo;
 
 
@@ -96,6 +101,25 @@ public sealed class MainSection : Section
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.NumpadMinus)
             _mouseLight.RayCount /= 2;
+
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Space)
+            PathTracer.RenderingPaused = !PathTracer.RenderingPaused;
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Enter)
+            PathTracer.RenderRestart();
+
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Q)
+        {
+            _useMouseLight = !_useMouseLight;
+            ShouldRestartRendering = true;
+
+            if (_useMouseLight)
+                PathTracer.LightSources.Add(_mouseLight);
+            else
+                PathTracer.LightSources.Remove(_mouseLight);
+        }
     }
 
 
@@ -104,6 +128,8 @@ public sealed class MainSection : Section
     public override void Draw(IRenderer renderer)
     {
         RestartRenderingIfRequested();
+
+        DrawPathTracerAccumulatedSample(renderer);
 
         DrawRaySources(renderer);
         DebugDraw(renderer);
@@ -123,35 +149,29 @@ public sealed class MainSection : Section
     }
 
 
+    private void DrawPathTracerAccumulatedSample(IRenderer renderer)
+    {
+        var texture = new Texture(PathTracer.AccumulatedSample);
+        var sprite = new Sprite(texture) { Scale = Scale };
+
+        renderer.Render(sprite);
+    }
+
+
     private void DrawRaySources(IRenderer renderer)
     {
-        foreach (var raySource in PathTracer.RaySources)
+        foreach (var raySource in PathTracer.LightSources)
             Latte.Debugging.Draw.Point(renderer, raySource.Position);
     }
 
 
     private void DebugDraw(IRenderer renderer)
     {
-        if (DebugDrawRayLines)
-            DebugRayLines(renderer);
-
         if (DebugDrawSegmentLines)
             DebugSegments(renderer);
 
         if (DebugDrawInfo)
             DebugInfo(renderer);
-    }
-
-
-    private void DebugRayLines(IRenderer renderer)
-    {
-        var intersectionPoints = PathTracer.TraceAll();
-
-        foreach (var ray in PathTracer.Rays)
-            Latte.Debugging.Draw.Line(renderer, ray.Origin, ray.At(10000), Color.Red);
-
-        foreach (var intersectionPoint in intersectionPoints)
-            Latte.Debugging.Draw.Line(renderer, intersectionPoint.LightRay.Origin, intersectionPoint.Point, Color.Blue);
     }
 
 
@@ -165,9 +185,30 @@ public sealed class MainSection : Section
 
     private void DebugInfo(IRenderer renderer)
     {
-        var info = $"FPS: {(int)DeltaTime.FramesPerSecond}\n" +
-                   $"Current Rays: {_mouseLight.RayCount}";
+        var stateIndicator = GetPathTracerRenderingStateStringIndicator();
+        var sampleDeltaTime = PathTracer.TimeSpentToRenderLastSample;
+        var info =
+            $"""
+             Time Spent Rendering Last: {sampleDeltaTime.TotalMilliseconds:N0}ms | {(int)DeltaTime.FPSFromDeltaTime(sampleDeltaTime.TotalSeconds)} FPS
+             Current Light Source Rays: {_mouseLight.RayCount}
+             Current Sample: {PathTracer.CurrentSampleCounter}/{PathTracer.Samples} {stateIndicator}
+             """;
 
         Latte.Debugging.Draw.Text(renderer, new Vec2f(), info, 12, Color.White);
+    }
+
+
+    private string GetPathTracerRenderingStateStringIndicator()
+    {
+        if (PathTracer.RenderingPaused)
+            return "paused";
+
+        if (PathTracer.RenderingFinished)
+            return "finished";
+
+        if (PathTracer.RenderingCancelled)
+            return "cancelled";
+
+        return string.Empty;
     }
 }

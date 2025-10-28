@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 
@@ -7,6 +8,8 @@ using SFML.Graphics;
 
 using Latte.Core.Type;
 
+
+using ThreadState = System.Threading.ThreadState;
 
 
 namespace LightRays.Engine;
@@ -19,54 +22,87 @@ public readonly record struct PixelColor(Vec2f Position, ColorRGBA Color);
 
 
 
-public class SampleRenderedEventArgs(Image finalSample, Image sample) : EventArgs
-{
-    public Image FinalSample { get; } = finalSample;
-    public Image Sample { get; } = sample;
-}
-
-
-
-
 public class PathTracer
 {
-    private Thread _renderThread;
+    private Thread _renderThread = null!;
     private CancellationTokenSource _renderThreadCancellationTokenSource;
+    private readonly ManualResetEvent _renderThreadPauseState;
+
+
+    private readonly List<LightRay> _rays;
 
 
 
 
     public List<Object> Objects { get; set; }
-    public List<LightRaySource> RaySources { get; set; }
-
-    public List<LightRay> Rays { get; set; } = [];
+    public List<LightRaySource> LightSources { get; set; }
 
 
-    public Vec2u SampleResolution { get; set; } = new Vec2u(1920, 1080);
-    public Vec2u SampleViewport { get; set; } = new Vec2u(1920, 1080);
 
-    public uint Samples { get; set; } = 1;
+    public Vec2u SampleResolution { get; set; }
+    public Vec2u SampleViewport { get; set; }
+
+    public uint Samples { get; set; }
+    public Image AccumulatedSample { get; private set; } = null!;
+    public Image CurrentSample { get; private set; } = null!;
+    public uint CurrentSampleCounter { get; private set; }
+    public TimeSpan TimeSpentToRenderLastSample { get; private set; }
+
+    public bool RenderingStarted => _renderThread.ThreadState.HasFlag(ThreadState.Running);
+    public bool RenderingFinished => _renderThread.ThreadState.HasFlag(ThreadState.Stopped);
+    public bool RenderingCancelled => _renderThreadCancellationTokenSource.IsCancellationRequested;
+
+    public bool RenderingPaused
+    {
+        get => !_renderThreadPauseState.WaitOne(0);
+        set
+        {
+            if (value)
+                _renderThreadPauseState.Reset();
+            else
+                _renderThreadPauseState.Set();
+        }
+    }
 
 
     public event EventHandler? RenderingStartedEvent;
     public event EventHandler? RenderingFinishedEvent;
-    public event EventHandler<SampleRenderedEventArgs>? SampleRenderedEvent;
+    public event EventHandler? SampleRenderedEvent;
 
 
 
 
-    public PathTracer(List<Object> objects, List<LightRaySource> raySources)
+    public PathTracer(List<Object> objects, List<LightRaySource> lightSources)
     {
-        _renderThread = new Thread(RenderThread);
+        InitRenderingThread();
         _renderThreadCancellationTokenSource = new CancellationTokenSource();
+        _renderThreadPauseState = new ManualResetEvent(false);
 
 
         Objects = objects;
-        RaySources = raySources;
+        LightSources = lightSources;
+        _rays = [];
+
+        SampleResolution = SampleViewport = new Vec2u(1920, 1080);
+
+        Samples = 1;
+        CurrentSampleCounter = 1;
+
+        InitSampleImageProperties();
     }
 
 
-    // TODO: finish multithreading sample rendering
+    private void InitRenderingThread()
+        => _renderThread = new Thread(RenderThread)
+        {
+            IsBackground = true,
+            Priority = ThreadPriority.Highest
+        };
+
+
+    private void InitSampleImageProperties()
+        => AccumulatedSample = CurrentSample = new Image(SampleResolution.X, SampleResolution.Y);
+
 
     public void RenderStart()
     {
@@ -77,18 +113,20 @@ public class PathTracer
 
     public void RenderRestart()
     {
-        RenderStopAndWait();
+        RenderCancelAndWaitFinish();
 
-        _renderThread = new Thread(RenderThread);
+        InitRenderingThread();
         RenderStart();
     }
 
 
-    public void RenderStopAndWait()
+    public void RenderCancelAndWaitFinish()
     {
+        RenderingPaused = false;
+
         _renderThreadCancellationTokenSource.Cancel();
 
-        if (_renderThread.ThreadState != ThreadState.Unstarted)
+        if (!_renderThread.ThreadState.HasFlag(ThreadState.Unstarted))
             _renderThread.Join();
     }
 
@@ -97,64 +135,93 @@ public class PathTracer
 
     private void RenderThread()
     {
-        RenderingStartedEvent?.Invoke(this, EventArgs.Empty);
+        OnRenderStart();
 
 
-        var pixels = new Color[SampleResolution.X, SampleResolution.Y];
+        var accumulator = new Color[SampleResolution.X, SampleResolution.Y];
 
         for (var i = 0; i < Samples; i++)
         {
-            var newPixels = RenderPixels(SampleResolution, SampleViewport);
-
-            for (var y = 0; y < newPixels.GetLength(0); y++)
-            for (var x = 0; x < newPixels.GetLength(1); x++)
-            {
-                ref var pixel = ref pixels[x, y];
-                var newPixel = newPixels[x, y];
-
-                pixel = AverageColor(pixel, newPixel);
-            }
-
-            var eventArgs = new SampleRenderedEventArgs(new Image(pixels), new Image(newPixels));
-            SampleRenderedEvent?.Invoke(this, eventArgs);
+            _renderThreadPauseState.WaitOne();
 
             if (_renderThreadCancellationTokenSource.IsCancellationRequested)
                 break;
+
+            var stopwatch = Stopwatch.StartNew();
+
+            RenderPixels(out var sample, SampleResolution, SampleViewport);
+
+            for (var x = 0; x < sample.GetLength(0); x++)
+            for (var y = 0; y < sample.GetLength(1); y++)
+            {
+                ref var pixel = ref accumulator[x, y];
+                ref var newPixel = ref sample[x, y];
+
+                pixel = AverageColor(ref pixel, ref newPixel);
+            }
+
+            TimeSpentToRenderLastSample = stopwatch.Elapsed;
+
+            OnSampleRendered(ref accumulator, ref sample);
         }
 
 
-        RenderingFinishedEvent?.Invoke(this, EventArgs.Empty);
+        OnRenderFinish();
     }
 
 
-    private Color AverageColor(Color left, Color right)
+    private static Color AverageColor(ref Color left, ref Color right)
     {
+        if (right is { R: 0, G: 0, B: 0, A: 0 })
+            return left;
+
         var average = left;
         average.R = (byte)(((float)average.R + right.R) / 2f);
         average.G = (byte)(((float)average.G + right.G) / 2f);
         average.B = (byte)(((float)average.B + right.B) / 2f);
-        average.A = (byte)(((float)average.B + right.B) / 2f);
+        average.A = right.A;//(byte)(((float)average.A + right.A) / 2f);
 
         return average;
     }
 
 
-
-
-    public Color[,] RenderPixels(Vec2u resolution, Vec2u viewport)
+    private void OnRenderStart()
     {
-        var pixels = new Color[resolution.X, resolution.Y];
+        InitSampleImageProperties();
+        CurrentSampleCounter = 1;
+
+        RenderingStartedEvent?.Invoke(this, EventArgs.Empty);
+    }
+
+
+    private void OnRenderFinish()
+        => RenderingFinishedEvent?.Invoke(this, EventArgs.Empty);
+
+
+    private void OnSampleRendered(ref Color[,] accumulator, ref Color[,] sample)
+    {
+        AccumulatedSample = new Image(accumulator);
+        CurrentSample = new Image(sample);
+        CurrentSampleCounter++;
+
+        SampleRenderedEvent?.Invoke(this, EventArgs.Empty);
+    }
+
+
+
+
+    public void RenderPixels(out Color[,] pixels, Vec2u resolution, Vec2u viewport)
+    {
+        pixels = new Color[resolution.X, resolution.Y];
         var intersections = TraceAll();
         var pixelColors = PixelColorsFromIntersections(intersections);
 
         foreach (var pixelColor in pixelColors)
-            RenderPixel(pixels, pixelColor, resolution, viewport);
-
-        return pixels;
+            RenderPixel(ref pixels, pixelColor, resolution, viewport);
     }
 
 
-    private void RenderPixel(Color[,] pixels, PixelColor pixelColor, Vec2u resolution, Vec2u viewport)
+    private void RenderPixel(ref Color[,] pixels, PixelColor pixelColor, Vec2u resolution, Vec2u viewport)
     {
         var roundedPosition = new Vec2f(MathF.Round(pixelColor.Position.X), MathF.Round(pixelColor.Position.Y));
         var normalizedDeviceCoordinate = MapToNormalizedDeviceCoordinate(viewport, roundedPosition);
@@ -191,9 +258,11 @@ public class PathTracer
 
         GenerateRaysFromSources();
 
-        foreach (var ray in Rays)
+        foreach (var ray in _rays)
             if (Trace(ray) is { } intersectionPoint)
                 intersections.Add(intersectionPoint);
+
+        _rays.Clear();
 
         return intersections;
     }
@@ -220,9 +289,9 @@ public class PathTracer
 
     private void GenerateRaysFromSources()
     {
-        Rays.Clear();
+        _rays.Clear();
 
-        foreach (var raySource in RaySources)
-            Rays.AddRange(raySource.GenerateRays());
+        foreach (var raySource in LightSources)
+            _rays.AddRange(raySource.GenerateRays());
     }
 }
