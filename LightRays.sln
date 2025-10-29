@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Editor", "Editor\Editor.csp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Milkway", "..\Milkway\Milkway\Milkway.csproj", "{997DC445-1215-4EDE-80FA-1450D6CFB84C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benchmarks", "Benchmarks\Benchmarks.csproj", "{46A6688F-1A51-440C-96B9-52614E20B3F6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{997DC445-1215-4EDE-80FA-1450D6CFB84C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{997DC445-1215-4EDE-80FA-1450D6CFB84C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{997DC445-1215-4EDE-80FA-1450D6CFB84C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{46A6688F-1A51-440C-96B9-52614E20B3F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{46A6688F-1A51-440C-96B9-52614E20B3F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{46A6688F-1A51-440C-96B9-52614E20B3F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{46A6688F-1A51-440C-96B9-52614E20B3F6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

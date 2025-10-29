@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
+
+
 using Latte.Core.Type;
 
 
@@ -19,6 +21,12 @@ public readonly record struct PixelColor(Vec2f Position, NormalizedColorRGBA Col
 
 public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
 {
+    private readonly ParallelOptions _parallelOptions = new ParallelOptions
+    {
+        MaxDegreeOfParallelism = Environment.ProcessorCount
+    };
+
+
     private readonly List<LightRay> _rays = [];
 
 
@@ -32,8 +40,10 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
         var intersections = TraceAll();
         var pixelColors = PixelColorsFromIntersections(intersections);
 
-        foreach (var pixelColor in pixelColors)
+        Parallel.ForEach(pixelColors, _parallelOptions, pixelColor =>
+        {
             RenderPixel(pixels, pixelColor, resolution, viewport);
+        });
 
         return pixels;
     }
@@ -72,26 +82,37 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
 
     public IEnumerable<LightRayIntersection> TraceAll()
     {
-        var intersections = new List<LightRayIntersection>();
+        var intersections = new ConcurrentBag<LightRayIntersection>();
 
         GenerateRaysFromSources();
 
-        foreach (var ray in _rays)
+        Parallel.ForEach(_rays, _parallelOptions, ray =>
+        {
             if (Trace(ray) is { } intersectionPoint)
                 intersections.Add(intersectionPoint);
-
-        _rays.Clear();
+        });
 
         return intersections;
     }
 
 
-    private LightRayIntersection? Trace(LightRay lightRay)
+    private void GenerateRaysFromSources()
+    {
+        _rays.Clear();
+
+        foreach (var raySource in LightSources)
+            _rays.AddRange(raySource.GenerateRays());
+    }
+
+
+
+
+    public LightRayIntersection? Trace(LightRay lightRay)
     {
         var intersectionsBag = new ConcurrentBag<LightRayIntersection>();
 
         // TODO: add ray bouncing and light energy loss
-        Parallel.ForEach(Objects, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, @object =>
+        Parallel.ForEach(Objects, _parallelOptions, @object =>
         {
             foreach (var segment in @object.Segments)
                 if (lightRay.IntersectsSegment(segment, out var t, out var u))
@@ -104,14 +125,5 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
         var intersections = intersectionsBag.OrderBy(point => point.RayT);
 
         return intersections.First();
-    }
-
-
-    private void GenerateRaysFromSources()
-    {
-        _rays.Clear();
-
-        foreach (var raySource in LightSources)
-            _rays.AddRange(raySource.GenerateRays());
     }
 }

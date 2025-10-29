@@ -55,7 +55,7 @@ public sealed class MainSection : Section
         PathTracer = new PathTracer([], [_mouseLight]);
 
         var generator = new Random();
-        for (var i = 0; i < 100; i++)
+        for (var i = 0; i < 50; i++)
         {
             var position = new Vec2f(generator.Next(0, (int)Viewport.X), generator.Next(0, (int)Viewport.Y));
             var size = new Vec2f(generator.Next(20, 200), generator.Next(20, 200));
