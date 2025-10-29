@@ -1,14 +1,10 @@
 using System;
 using System.Diagnostics;
-using System.Threading;
 using System.Threading.Tasks;
 
 using SFML.Graphics;
 
 using Latte.Core.Type;
-
-
-using ThreadState = System.Threading.ThreadState;
 
 
 namespace LightRays.Engine;
@@ -18,13 +14,6 @@ namespace LightRays.Engine;
 
 public class PathTracerSampler
 {
-    private Thread _renderThread = null!;
-    private CancellationTokenSource _renderThreadCancellationTokenSource;
-    private readonly ManualResetEvent _renderThreadPauseState;
-
-
-
-
     public PathTracer PathTracer { get; }
 
 
@@ -32,8 +21,11 @@ public class PathTracerSampler
     public Vec2u SampleViewport { get; set; }
 
     public uint Samples { get; set; }
-    public Image AccumulatedSample { get; private set; } = null!;
     public uint CurrentSampleCounter { get; private set; }
+
+
+    private ImagePixels _sampleAccumulator;
+    public Image Rendering { get; private set; } = null!;
 
 
     public TimeSpan TimeSpent { get; private set; }
@@ -42,25 +34,9 @@ public class PathTracerSampler
     public TimeSpan TimeSpentCreatingImage { get; private set; }
 
 
-    public bool RenderingStarted => _renderThread.ThreadState.HasFlag(ThreadState.Running);
-    public bool RenderingFinished => _renderThread.ThreadState.HasFlag(ThreadState.Stopped);
-    public bool RenderingCancelled => _renderThreadCancellationTokenSource.IsCancellationRequested;
-
-    public bool RenderingPaused
-    {
-        get => !_renderThreadPauseState.WaitOne(0);
-        set
-        {
-            if (value)
-                _renderThreadPauseState.Reset();
-            else
-                _renderThreadPauseState.Set();
-        }
-    }
+    public bool RenderingFinished => CurrentSampleCounter >= Samples;
 
 
-    public event EventHandler? RenderingStartedEvent;
-    public event EventHandler? RenderingFinishedEvent;
     public event EventHandler? SampleRenderedEvent;
 
 
@@ -70,95 +46,46 @@ public class PathTracerSampler
     {
         PathTracer = pathTracer;
 
-
-        InitRenderingThread();
-        _renderThreadCancellationTokenSource = new CancellationTokenSource();
-        _renderThreadPauseState = new ManualResetEvent(false);
-
         SampleResolution = SampleViewport = new Vec2u(1920, 1080);
-
         Samples = samples;
-        CurrentSampleCounter = 1;
 
-        InitSampleImageProperties();
+        ResetRender();
     }
-
-
-    private void InitRenderingThread()
-    => _renderThread = new Thread(RenderThread)
-    {
-        IsBackground = true,
-        Priority = ThreadPriority.Highest
-    };
 
 
     private void InitSampleImageProperties()
-        => AccumulatedSample = new Image(SampleResolution.X, SampleResolution.Y);
+        => Rendering = new Image(SampleResolution.X, SampleResolution.Y);
 
 
 
 
-    public void RenderStart()
+    public void ResetRender()
     {
-        _renderThreadCancellationTokenSource = new CancellationTokenSource();
-        _renderThread.Start();
+        _sampleAccumulator = new ImagePixels(SampleResolution.X, SampleResolution.Y);
+
+        InitSampleImageProperties();
+        CurrentSampleCounter = 0;
     }
 
 
-    public void RenderRestart()
+    public void RenderNext()
     {
-        RenderCancelAndWaitFinish();
+        if (RenderingFinished)
+            return;
 
-        InitRenderingThread();
-        RenderStart();
-    }
+        var start = Stopwatch.GetTimestamp();
+        var sample = PathTracer.RenderPixels(SampleResolution, SampleViewport);
+        TimeSpentTracing = Stopwatch.GetElapsedTime(start);
 
+        start = Stopwatch.GetTimestamp();
+        AccumulateSample(_sampleAccumulator, sample);
+        TimeSpentAveraging = Stopwatch.GetElapsedTime(start);
 
-    public void RenderCancelAndWaitFinish()
-    {
-        RenderingPaused = false;
+        start = Stopwatch.GetTimestamp();
+        OnSampleRendered();
+        TimeSpentCreatingImage = Stopwatch.GetElapsedTime(start);
 
-        _renderThreadCancellationTokenSource.Cancel();
-
-        if (!_renderThread.ThreadState.HasFlag(ThreadState.Unstarted))
-            _renderThread.Join();
-    }
-
-
-
-
-    private void RenderThread()
-    {
-        OnRenderStart();
-
-
-        var accumulator = new ImagePixels(SampleResolution.X, SampleResolution.Y);
-
-        for (var i = 0; i < Samples; i++)
-        {
-            _renderThreadPauseState.WaitOne();
-
-            if (_renderThreadCancellationTokenSource.IsCancellationRequested)
-                break;
-
-
-            var start = Stopwatch.GetTimestamp();
-            var sample = PathTracer.RenderPixels(SampleResolution, SampleViewport);
-            TimeSpentTracing = Stopwatch.GetElapsedTime(start);
-
-            start = Stopwatch.GetTimestamp();
-            AccumulateSample(accumulator, sample);
-            TimeSpentAveraging = Stopwatch.GetElapsedTime(start);
-
-            start = Stopwatch.GetTimestamp();
-            OnSampleRendered(accumulator);
-            TimeSpentCreatingImage = Stopwatch.GetElapsedTime(start);
-
-            TimeSpent = TimeSpentTracing + TimeSpentAveraging + TimeSpentCreatingImage;
-        }
-
-
-        OnRenderFinish();
+        TimeSpent = TimeSpentTracing + TimeSpentAveraging + TimeSpentCreatingImage;
     }
 
 
@@ -184,9 +111,9 @@ public class PathTracerSampler
 
         // colorAverage += (newSample - colorAverage) / sampleCount;
 
-        average.R += (addition.R - average.R) / CurrentSampleCounter;
-        average.G += (addition.G - average.G) / CurrentSampleCounter;
-        average.B += (addition.B - average.B) / CurrentSampleCounter;
+        average.R += (addition.R - average.R) / (CurrentSampleCounter / 1f);
+        average.G += (addition.G - average.G) / (CurrentSampleCounter / 1f);
+        average.B += (addition.B - average.B) / (CurrentSampleCounter / 1f);
         average.A = addition.A;
 
         return average;
@@ -195,24 +122,11 @@ public class PathTracerSampler
 
 
 
-    private void OnRenderStart()
+    private void OnSampleRendered()
     {
-        InitSampleImageProperties();
-        CurrentSampleCounter = 1;
+        var bytes = _sampleAccumulator.GetBytes();
 
-        RenderingStartedEvent?.Invoke(this, EventArgs.Empty);
-    }
-
-
-    private void OnRenderFinish()
-        => RenderingFinishedEvent?.Invoke(this, EventArgs.Empty);
-
-
-    private void OnSampleRendered(ImagePixels accumulator)
-    {
-        var bytes = accumulator.GetBytes();
-
-        AccumulatedSample = new Image(accumulator.Width, accumulator.Height, bytes);
+        Rendering = new Image(_sampleAccumulator.Width, _sampleAccumulator.Height, bytes);
         CurrentSampleCounter++;
 
         SampleRenderedEvent?.Invoke(this, EventArgs.Empty);

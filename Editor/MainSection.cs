@@ -1,3 +1,5 @@
+using System;
+
 using SFML.Window;
 using SFML.Graphics;
 
@@ -32,6 +34,8 @@ public sealed class MainSection : Section
     public PathTracer PathTracer { get; set; }
     public bool ShouldRestartRendering { get; set; }
 
+    public bool Paused { get; set; }
+
 
     public bool DebugDrawSegmentLines { get; set; }
     public bool DebugDrawInfo { get; set; }
@@ -43,17 +47,24 @@ public sealed class MainSection : Section
     {
         _mouseLight = new LightRaySource(new Vec2f(), 1024)
         {
-            Color = Color.Red
+            Color = Color.White
         };
         _useMouseLight = true;
 
 
-        PathTracer = new PathTracer(
-            [new RectangleObject(new Vec2f(1300, 300), new Vec2f(200, 200), Color.White)],
-            [_mouseLight, new LightRaySource(new Vec2f(700, 200), 1024, Color.Blue)]
-        );
+        PathTracer = new PathTracer([], [_mouseLight]);
 
-        Sampler = new PathTracerSampler(PathTracer, 256)
+        var generator = new Random();
+        for (var i = 0; i < 100; i++)
+        {
+            var position = new Vec2f(generator.Next(0, (int)Viewport.X), generator.Next(0, (int)Viewport.Y));
+            var size = new Vec2f(generator.Next(20, 200), generator.Next(20, 200));
+
+            PathTracer.Objects.Add(new RectangleObject(position, size));
+        }
+
+
+        Sampler = new PathTracerSampler(PathTracer, 1024)
         {
             SampleResolution = Resolution,
             SampleViewport = Viewport
@@ -109,11 +120,8 @@ public sealed class MainSection : Section
             _mouseLight.RayCount /= 2;
 
 
-        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Space)
-            Sampler.RenderingPaused = !Sampler.RenderingPaused;
-
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Enter)
-            Sampler.RenderRestart();
+            Sampler.ResetRender();
 
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Q)
@@ -135,6 +143,7 @@ public sealed class MainSection : Section
     {
         RestartRenderingIfRequested();
 
+        Sampler.RenderNext();
         DrawPathTracerAccumulatedSample(renderer);
 
         DrawRaySources(renderer);
@@ -149,7 +158,7 @@ public sealed class MainSection : Section
         if (!ShouldRestartRendering)
             return;
 
-        Sampler.RenderRestart();
+        Sampler.ResetRender();
 
         ShouldRestartRendering = false;
     }
@@ -157,7 +166,7 @@ public sealed class MainSection : Section
 
     private void DrawPathTracerAccumulatedSample(IRenderer renderer)
     {
-        var texture = new Texture(Sampler.AccumulatedSample);
+        var texture = new Texture(Sampler.Rendering);
         var sprite = new Sprite(texture) { Scale = Scale };
 
         renderer.Render(sprite);
@@ -194,14 +203,14 @@ public sealed class MainSection : Section
         var stateIndicator = GetPathTracerRenderingStateStringIndicator();
         var info =
             $"""
-             Time Spent Rendering Last: {Sampler.TimeSpent.TotalMilliseconds:N0}ms | {(int)DeltaTime.FPSFromDeltaTime(Sampler.TimeSpent.TotalSeconds)} FPS
-             - Tracing: {Sampler.TimeSpentTracing.TotalMilliseconds:N0}ms
-             - Averaging: {Sampler.TimeSpentAveraging.TotalMilliseconds:N0}ms
-             - Creating Image: {Sampler.TimeSpentCreatingImage.TotalMilliseconds:N0}ms
-             
-             Current Light Source Rays: {_mouseLight.RayCount}
-             Current Sample: {Sampler.CurrentSampleCounter}/{Sampler.Samples} {stateIndicator}
-             """;
+            Time Spent Rendering Last: {Sampler.TimeSpent.TotalMilliseconds:N0}ms | {(int)DeltaTime.FPSFromDeltaTime(Sampler.TimeSpent.TotalSeconds)} FPS
+            - Tracing: {Sampler.TimeSpentTracing.TotalMilliseconds:N0}ms
+            - Averaging: {Sampler.TimeSpentAveraging.TotalMilliseconds:N0}ms
+            - Creating Image: {Sampler.TimeSpentCreatingImage.TotalMilliseconds:N0}ms
+
+            Current Light Source Rays: {_mouseLight.RayCount}
+            Current Sample: {Sampler.CurrentSampleCounter}/{Sampler.Samples} {stateIndicator}
+            """;
 
         Latte.Debugging.Draw.Text(renderer, new Vec2f(), info, 12, Color.White);
     }
@@ -209,14 +218,11 @@ public sealed class MainSection : Section
 
     private string GetPathTracerRenderingStateStringIndicator()
     {
-        if (Sampler.RenderingPaused)
+        if (Paused)
             return "paused";
 
         if (Sampler.RenderingFinished)
             return "finished";
-
-        if (Sampler.RenderingCancelled)
-            return "cancelled";
 
         return string.Empty;
     }

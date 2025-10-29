@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 using Latte.Core.Type;
 
@@ -37,9 +39,9 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
     }
 
 
-    private void RenderPixel(ImagePixels pixels, PixelColor pixelColor, Vec2u resolution, Vec2u viewport)
+    private void RenderPixel(ImagePixels pixels, PixelColor intersection, Vec2u resolution, Vec2u viewport)
     {
-        var roundedPosition = new Vec2f(MathF.Round(pixelColor.Position.X), MathF.Round(pixelColor.Position.Y));
+        var roundedPosition = new Vec2f(MathF.Round(intersection.Position.X), MathF.Round(intersection.Position.Y));
         var normalizedDeviceCoordinate = MapToNormalizedDeviceCoordinate(viewport, roundedPosition);
         var imagePixel = MapNormalizedDeviceCoordinateToPixel(resolution, normalizedDeviceCoordinate);
 
@@ -47,7 +49,7 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
             imagePixel.Y < 0 || imagePixel.Y >= pixels.Height)
             return;
 
-        pixels[(uint)imagePixel.X, (uint)imagePixel.Y] = pixelColor.Color;
+        pixels[(uint)imagePixel.X, (uint)imagePixel.Y] = intersection.Color;
     }
 
 
@@ -86,18 +88,20 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
 
     private LightRayIntersection? Trace(LightRay lightRay)
     {
-        var intersections = new List<LightRayIntersection>();
+        var intersectionsBag = new ConcurrentBag<LightRayIntersection>();
 
         // TODO: add ray bouncing and light energy loss
-        foreach (var @object in Objects.ToArray())
-        foreach (var segment in @object.Segments)
-            if (lightRay.IntersectsSegment(segment, out var t, out var u))
-                intersections.Add(new LightRayIntersection(lightRay, segment, t, u));
+        Parallel.ForEach(Objects, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, @object =>
+        {
+            foreach (var segment in @object.Segments)
+                if (lightRay.IntersectsSegment(segment, out var t, out var u))
+                    intersectionsBag.Add(new LightRayIntersection(lightRay, segment, t, u));
+        });
 
-        if (intersections.Count == 0)
+        if (intersectionsBag.IsEmpty)
             return null;
 
-        intersections = intersections.OrderBy(point => point.RayT).ToList();
+        var intersections = intersectionsBag.OrderBy(point => point.RayT);
 
         return intersections.First();
     }
@@ -107,7 +111,7 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
     {
         _rays.Clear();
 
-        foreach (var raySource in LightSources.ToArray())
+        foreach (var raySource in LightSources)
             _rays.AddRange(raySource.GenerateRays());
     }
 }
