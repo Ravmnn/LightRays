@@ -49,6 +49,7 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
     }
 
 
+    // TODO: improve light visualization, colorize the whole object instead of the outline only
     private void RenderPixel(ImagePixels pixels, PixelColor intersection, Vec2u resolution, Vec2u viewport)
     {
         var roundedPosition = new Vec2f(MathF.Round(intersection.Position.X), MathF.Round(intersection.Position.Y));

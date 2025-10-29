@@ -1,5 +1,6 @@
 using System;
 
+using Latte.Core;
 using Latte.Core.Type;
 
 
@@ -28,12 +29,23 @@ public struct LightRay(Vec2f origin, Vec2f direction, NormalizedColorRGBA? color
 
 
 
+    // TODO: make reflections work
+    public void Reflect(Vec2f normal)
+    {
+        var newDirection = Direction - normal * (2 * Direction.Dot(normal));
+
+        Direction = newDirection;
+    }
+
+
+
+
     public bool IntersectsSegment(Segment segment, out float t, out float u)
     {
         var segmentVector = segment.Vector;
         var raySegmentVector = segment.Start - Origin;
 
-        var denom = Cross(Direction, segmentVector);
+        var denom = Direction.Cross(segmentVector);
 
         if (Math.Abs(denom) < 1e-6f)
         {
@@ -41,15 +53,9 @@ public struct LightRay(Vec2f origin, Vec2f direction, NormalizedColorRGBA? color
             return false;
         }
 
-        t = Cross(raySegmentVector, segmentVector) / denom;
-        u = Cross(raySegmentVector, Direction) / denom;
+        t = Vector.Cross(raySegmentVector, segmentVector) / denom;
+        u = Vector.Cross(raySegmentVector, Direction) / denom;
 
         return t >= 0.0f && u is >= 0.0f and <= 1.0f;
     }
-
-
-
-
-    private static float Cross(Vec2f a, Vec2f b)
-        => a.X * b.Y - a.Y * b.X;
 }
