@@ -24,31 +24,30 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
     public List<LightRaySource> LightSources { get; set; } = lightSources;
 
 
-    public NormalizedColorRGBA[,] RenderPixels(Vec2u resolution, Vec2u viewport)
+    public ImagePixels RenderPixels(Vec2u resolution, Vec2u viewport)
     {
-        var pixels = new NormalizedColorRGBA[resolution.X, resolution.Y];
+        var pixels = new ImagePixels(resolution.X, resolution.Y);
         var intersections = TraceAll();
         var pixelColors = PixelColorsFromIntersections(intersections);
 
         foreach (var pixelColor in pixelColors)
-            RenderPixel(ref pixels, pixelColor, resolution, viewport);
+            RenderPixel(pixels, pixelColor, resolution, viewport);
 
         return pixels;
     }
 
 
-    // TODO: remove ref and check if it works
-    private void RenderPixel(ref NormalizedColorRGBA[,] pixels, PixelColor pixelColor, Vec2u resolution, Vec2u viewport)
+    private void RenderPixel(ImagePixels pixels, PixelColor pixelColor, Vec2u resolution, Vec2u viewport)
     {
         var roundedPosition = new Vec2f(MathF.Round(pixelColor.Position.X), MathF.Round(pixelColor.Position.Y));
         var normalizedDeviceCoordinate = MapToNormalizedDeviceCoordinate(viewport, roundedPosition);
         var imagePixel = MapNormalizedDeviceCoordinateToPixel(resolution, normalizedDeviceCoordinate);
 
-        if (imagePixel.X < 0 || imagePixel.X >= pixels.GetLength(0) ||
-            imagePixel.Y < 0 || imagePixel.Y >= pixels.GetLength(1))
+        if (imagePixel.X < 0 || imagePixel.X >= pixels.Width ||
+            imagePixel.Y < 0 || imagePixel.Y >= pixels.Height)
             return;
 
-        pixels[imagePixel.X, imagePixel.Y] = pixelColor.Color;
+        pixels[(uint)imagePixel.X, (uint)imagePixel.Y] = pixelColor.Color;
     }
 
 
@@ -90,7 +89,7 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
         var intersections = new List<LightRayIntersection>();
 
         // TODO: add ray bouncing and light energy loss
-        foreach (var @object in Objects)
+        foreach (var @object in Objects.ToArray())
         foreach (var segment in @object.Segments)
             if (lightRay.IntersectsSegment(segment, out var t, out var u))
                 intersections.Add(new LightRayIntersection(lightRay, segment, t, u));
@@ -108,7 +107,7 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
     {
         _rays.Clear();
 
-        foreach (var raySource in LightSources)
+        foreach (var raySource in LightSources.ToArray())
             _rays.AddRange(raySource.GenerateRays());
     }
 }

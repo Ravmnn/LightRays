@@ -53,7 +53,7 @@ public sealed class MainSection : Section
             [_mouseLight, new LightRaySource(new Vec2f(700, 200), 1024, Color.Blue)]
         );
 
-        Sampler = new PathTracerSampler(PathTracer, 32)
+        Sampler = new PathTracerSampler(PathTracer, 256)
         {
             SampleResolution = Resolution,
             SampleViewport = Viewport
@@ -192,10 +192,13 @@ public sealed class MainSection : Section
     private void DebugInfo(IRenderer renderer)
     {
         var stateIndicator = GetPathTracerRenderingStateStringIndicator();
-        var sampleDeltaTime = Sampler.TimeSpentToRenderLastSample;
         var info =
             $"""
-             Time Spent Rendering Last: {sampleDeltaTime.TotalMilliseconds:N0}ms | {(int)DeltaTime.FPSFromDeltaTime(sampleDeltaTime.TotalSeconds)} FPS
+             Time Spent Rendering Last: {Sampler.TimeSpent.TotalMilliseconds:N0}ms | {(int)DeltaTime.FPSFromDeltaTime(Sampler.TimeSpent.TotalSeconds)} FPS
+             - Tracing: {Sampler.TimeSpentTracing.TotalMilliseconds:N0}ms
+             - Averaging: {Sampler.TimeSpentAveraging.TotalMilliseconds:N0}ms
+             - Creating Image: {Sampler.TimeSpentCreatingImage.TotalMilliseconds:N0}ms
+             
              Current Light Source Rays: {_mouseLight.RayCount}
              Current Sample: {Sampler.CurrentSampleCounter}/{Sampler.Samples} {stateIndicator}
              """;

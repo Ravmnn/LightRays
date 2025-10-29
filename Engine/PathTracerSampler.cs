@@ -1,8 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 
 using SFML.Graphics;
 
@@ -34,9 +33,14 @@ public class PathTracerSampler
 
     public uint Samples { get; set; }
     public Image AccumulatedSample { get; private set; } = null!;
-    public Image CurrentSample { get; private set; } = null!;
     public uint CurrentSampleCounter { get; private set; }
-    public TimeSpan TimeSpentToRenderLastSample { get; private set; }
+
+
+    public TimeSpan TimeSpent { get; private set; }
+    public TimeSpan TimeSpentTracing { get; private set; }
+    public TimeSpan TimeSpentAveraging { get; private set; }
+    public TimeSpan TimeSpentCreatingImage { get; private set; }
+
 
     public bool RenderingStarted => _renderThread.ThreadState.HasFlag(ThreadState.Running);
     public bool RenderingFinished => _renderThread.ThreadState.HasFlag(ThreadState.Stopped);
@@ -66,6 +70,7 @@ public class PathTracerSampler
     {
         PathTracer = pathTracer;
 
+
         InitRenderingThread();
         _renderThreadCancellationTokenSource = new CancellationTokenSource();
         _renderThreadPauseState = new ManualResetEvent(false);
@@ -73,7 +78,7 @@ public class PathTracerSampler
         SampleResolution = SampleViewport = new Vec2u(1920, 1080);
 
         Samples = samples;
-        CurrentSampleCounter = 0;
+        CurrentSampleCounter = 1;
 
         InitSampleImageProperties();
     }
@@ -88,7 +93,7 @@ public class PathTracerSampler
 
 
     private void InitSampleImageProperties()
-        => AccumulatedSample = CurrentSample = new Image(SampleResolution.X, SampleResolution.Y);
+        => AccumulatedSample = new Image(SampleResolution.X, SampleResolution.Y);
 
 
 
@@ -127,7 +132,7 @@ public class PathTracerSampler
         OnRenderStart();
 
 
-        var accumulator = new NormalizedColorRGBA[SampleResolution.X, SampleResolution.Y];
+        var accumulator = new ImagePixels(SampleResolution.X, SampleResolution.Y);
 
         for (var i = 0; i < Samples; i++)
         {
@@ -136,26 +141,39 @@ public class PathTracerSampler
             if (_renderThreadCancellationTokenSource.IsCancellationRequested)
                 break;
 
-            var stopwatch = Stopwatch.StartNew();
 
+            var start = Stopwatch.GetTimestamp();
             var sample = PathTracer.RenderPixels(SampleResolution, SampleViewport);
+            TimeSpentTracing = Stopwatch.GetElapsedTime(start);
 
-            for (var x = 0; x < sample.GetLength(0); x++)
-            for (var y = 0; y < sample.GetLength(1); y++)
-            {
-                ref var pixel = ref accumulator[x, y];
-                var newPixel = sample[x, y];
+            start = Stopwatch.GetTimestamp();
+            AccumulateSample(accumulator, sample);
+            TimeSpentAveraging = Stopwatch.GetElapsedTime(start);
 
-                pixel = AverageColor(pixel, newPixel);
-            }
+            start = Stopwatch.GetTimestamp();
+            OnSampleRendered(accumulator);
+            TimeSpentCreatingImage = Stopwatch.GetElapsedTime(start);
 
-            TimeSpentToRenderLastSample = stopwatch.Elapsed;
-
-            OnSampleRendered(accumulator, sample);
+            TimeSpent = TimeSpentTracing + TimeSpentAveraging + TimeSpentCreatingImage;
         }
 
 
         OnRenderFinish();
+    }
+
+
+    private void AccumulateSample(ImagePixels accumulator, ImagePixels sample)
+    {
+        Parallel.For(0, sample.Height, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, y =>
+        {
+            for (var x = 0u; x < sample.Width; x++)
+            {
+                ref var pixel = ref accumulator[x, (uint)y];
+                var newPixel = sample[x, (uint)y];
+
+                pixel = AverageColor(pixel, newPixel);
+            }
+        });
     }
 
 
@@ -166,13 +184,15 @@ public class PathTracerSampler
 
         // colorAverage += (newSample - colorAverage) / sampleCount;
 
-        average.R += (addition.R - average.R) / Samples;
-        average.G += (addition.G - average.G) / Samples;
-        average.B += (addition.B - average.B) / Samples;
+        average.R += (addition.R - average.R) / CurrentSampleCounter;
+        average.G += (addition.G - average.G) / CurrentSampleCounter;
+        average.B += (addition.B - average.B) / CurrentSampleCounter;
         average.A = addition.A;
 
         return average;
     }
+
+
 
 
     private void OnRenderStart()
@@ -188,38 +208,13 @@ public class PathTracerSampler
         => RenderingFinishedEvent?.Invoke(this, EventArgs.Empty);
 
 
-    // TODO: 
-    private void OnSampleRendered(NormalizedColorRGBA[,] accumulator, NormalizedColorRGBA[,] sample)
+    private void OnSampleRendered(ImagePixels accumulator)
     {
-        var width = (uint)accumulator.GetLength(0);
-        var height = (uint)accumulator.GetLength(1);
+        var bytes = accumulator.GetBytes();
 
-        AccumulatedSample = new Image(width, height, NormalizedColorMatrixToBytes(accumulator));
-        CurrentSample = new Image(width, height, NormalizedColorMatrixToBytes(sample));
+        AccumulatedSample = new Image(accumulator.Width, accumulator.Height, bytes);
         CurrentSampleCounter++;
 
         SampleRenderedEvent?.Invoke(this, EventArgs.Empty);
-    }
-
-
-    private byte[] NormalizedColorMatrixToBytes(NormalizedColorRGBA[,] colors)
-    {
-        var bytes = new byte[colors.Length * 4];
-
-        var width = (uint)colors.GetLength(0);
-        var height  = (uint)colors.GetLength(1);
-
-        for (var x = 0; x < colors.GetLength(0); x++)
-        for (var y = 0; y < colors.GetLength(1); y++)
-        {
-            var baseIndex = (y * width + x) * 4;
-
-            bytes[baseIndex + 0] = (byte)(colors[x, y].R * 255);
-            bytes[baseIndex + 1] = (byte)(colors[x, y].G * 255);
-            bytes[baseIndex + 2] = (byte)(colors[x, y].B * 255);
-            bytes[baseIndex + 3] = (byte)(colors[x, y].A * 255);
-        }
-
-        return bytes.ToArray();
     }
 }
