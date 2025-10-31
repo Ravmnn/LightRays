@@ -1,5 +1,3 @@
-using SFML.Graphics;
-
 using Latte.Core.Type;
 
 
@@ -11,7 +9,7 @@ namespace LightRays.Engine;
 public class RectangleObject : Object
 {
     public RectangleObject(Vec2f position, Vec2f size, NormalizedColorRGBA? color = null)
-        : base(new Material(color ?? Color.White))
+        : base(new Material(color))
     {
         Segments = [
             new Segment(this, position, position + new Vec2f(size.X, 0)),

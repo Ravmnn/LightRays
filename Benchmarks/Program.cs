@@ -42,8 +42,8 @@ public class PathTracerBenchmarks
             rays.AddRange(raySource.GenerateRays());
 
         foreach (var ray in rays)
-            if (_pathTracer.Trace(ray) is { } intersectionPoint)
-                intersections.Add(intersectionPoint);
+        foreach (var intersection in _pathTracer.Trace(ray))
+            intersections.Add(intersection);
     }
 
 
@@ -58,8 +58,8 @@ public class PathTracerBenchmarks
 
         Parallel.ForEach(rays, new ParallelOptions(), ray =>
         {
-            if (_pathTracer.Trace(ray) is { } intersectionPoint)
-                intersections.Add(intersectionPoint);
+            foreach (var intersection in _pathTracer.Trace(ray))
+                intersections.Add(intersection);
         });
     }
 }

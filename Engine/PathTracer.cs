@@ -23,7 +23,13 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
 {
     private readonly ParallelOptions _parallelOptions = new ParallelOptions
     {
+
+#if DEBUG
+        MaxDegreeOfParallelism = 1 // it's difficult to debug methods that uses parallelism
+#else
         MaxDegreeOfParallelism = Environment.ProcessorCount
+#endif
+
     };
 
 
@@ -32,6 +38,10 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
 
     public List<Object> Objects { get; set; } = objects;
     public List<LightRaySource> LightSources { get; set; } = lightSources;
+
+    public uint Bounces { get; set; }
+
+
 
 
     public ImagePixels RenderPixels(Vec2u resolution, Vec2u viewport)
@@ -49,7 +59,6 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
     }
 
 
-    // TODO: improve light visualization, colorize the whole object instead of the outline only
     private void RenderPixel(ImagePixels pixels, PixelColor intersection, Vec2u resolution, Vec2u viewport)
     {
         var roundedPosition = new Vec2f(MathF.Round(intersection.Position.X), MathF.Round(intersection.Position.Y));
@@ -89,8 +98,8 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
 
         Parallel.ForEach(_rays, _parallelOptions, ray =>
         {
-            if (Trace(ray) is { } intersectionPoint)
-                intersections.Add(intersectionPoint);
+            foreach (var intersection in Trace(ray))
+                intersections.Add(intersection);
         });
 
         return intersections;
@@ -108,11 +117,42 @@ public class PathTracer(List<Object> objects, List<LightRaySource> lightSources)
 
 
 
-    public LightRayIntersection? Trace(LightRay lightRay)
+    public IEnumerable<LightRayIntersection> Trace(LightRay lightRay)
+    {
+        var bounceIntersections = new List<LightRayIntersection>();
+        var ray = lightRay;
+
+        for (var i = 0; i <= Bounces; i++)
+        {
+            if (GetFirstLightRayIntersection(ray) is not { } intersection)
+            {
+                // first ray not intersecting means no bouncing at all
+                if (i == 0)
+                    break;
+
+                continue;
+            }
+
+            bounceIntersections.Add(intersection);
+
+            if (i + 1 > Bounces)
+                continue;
+
+            // TODO: don't forget about Material.Spreading
+
+            // TODO: you can remove this after Latte start to use Vec2s as structs:
+            ray = new LightRay(ray.Origin.Copy(), ray.Direction.Copy());
+            ray.Reflect(intersection);
+        }
+
+        return bounceIntersections;
+    }
+
+
+    private LightRayIntersection? GetFirstLightRayIntersection(LightRay lightRay)
     {
         var intersectionsBag = new ConcurrentBag<LightRayIntersection>();
 
-        // TODO: add ray bouncing and light energy loss
         Parallel.ForEach(Objects, _parallelOptions, @object =>
         {
             foreach (var segment in @object.Segments)

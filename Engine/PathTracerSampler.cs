@@ -22,6 +22,7 @@ public class PathTracerSampler
 
     public uint Samples { get; set; }
     public uint CurrentSampleCounter { get; private set; }
+    public float SampleWeightDistribution { get; set; }
 
 
     private ImagePixels _sampleAccumulator;
@@ -49,6 +50,8 @@ public class PathTracerSampler
         SampleResolution = SampleViewport = new Vec2u(1920, 1080);
         Samples = samples;
 
+        SampleWeightDistribution = 6f;
+
         ResetRender();
     }
 
@@ -64,7 +67,7 @@ public class PathTracerSampler
         _sampleAccumulator = new ImagePixels(SampleResolution.X, SampleResolution.Y);
 
         InitSampleImageProperties();
-        CurrentSampleCounter = 0;
+        CurrentSampleCounter = 1;
     }
 
 
@@ -111,9 +114,9 @@ public class PathTracerSampler
 
         // colorAverage += (newSample - colorAverage) / sampleCount;
 
-        average.R += (addition.R - average.R) / (CurrentSampleCounter / 1f);
-        average.G += (addition.G - average.G) / (CurrentSampleCounter / 1f);
-        average.B += (addition.B - average.B) / (CurrentSampleCounter / 1f);
+        average.R += (addition.R - average.R) / (CurrentSampleCounter / SampleWeightDistribution);
+        average.G += (addition.G - average.G) / (CurrentSampleCounter / SampleWeightDistribution);
+        average.B += (addition.B - average.B) / (CurrentSampleCounter / SampleWeightDistribution);
         average.A = addition.A;
 
         return average;

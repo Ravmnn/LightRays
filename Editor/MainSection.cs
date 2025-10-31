@@ -37,6 +37,7 @@ public sealed class MainSection : Section
     public bool Paused { get; set; }
 
 
+    public bool DebugDrawRays { get; set; }
     public bool DebugDrawSegmentLines { get; set; }
     public bool DebugDrawInfo { get; set; }
 
@@ -45,17 +46,25 @@ public sealed class MainSection : Section
 
     public MainSection()
     {
-        _mouseLight = new LightRaySource(new Vec2f(), 1024)
+        _mouseLight = new LightRaySource(new Vec2f(), 32)
         {
             Color = Color.White
         };
         _useMouseLight = true;
 
 
-        PathTracer = new PathTracer([], [_mouseLight]);
+        PathTracer = new PathTracer([], [_mouseLight])
+        {
+            Bounces = 2
+        };
+
+        // PathTracer.Objects.Add(new RectangleObject(new Vec2f(200, 200), new Vec2f(300, 300)));
+        // PathTracer.Objects.Add(new RectangleObject(new Vec2f(1000, 200), new Vec2f(300, 300)));
+        // PathTracer.Objects.Add(new RectangleObject(new Vec2f(200, 600), new Vec2f(300, 300)));
+        // PathTracer.Objects.Add(new RectangleObject(new Vec2f(1000, 600), new Vec2f(300, 300)));
 
         var generator = new Random();
-        for (var i = 0; i < 50; i++)
+        for (var i = 0; i < 70; i++)
         {
             var position = new Vec2f(generator.Next(0, (int)Viewport.X), generator.Next(0, (int)Viewport.Y));
             var size = new Vec2f(generator.Next(20, 200), generator.Next(20, 200));
@@ -74,6 +83,7 @@ public sealed class MainSection : Section
         ShouldRestartRendering = true;
 
 
+        DebugDrawRays = false;
         DebugDrawSegmentLines = false;
         DebugDrawInfo = true;
 
@@ -107,21 +117,66 @@ public sealed class MainSection : Section
     private void ProcessKeyInput()
     {
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Num1)
-            DebugDrawSegmentLines = !DebugDrawSegmentLines;
+            DebugDrawRays = !DebugDrawRays;
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Num2)
+            DebugDrawSegmentLines = !DebugDrawSegmentLines;
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Num3)
             DebugDrawInfo = !DebugDrawInfo;
 
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.NumpadPlus)
-            _mouseLight.RayCount *= 2;
+        {
+            if (KeyboardInput.ReleasedKey?.Shift ?? false)
+                PathTracer.Bounces += 1;
+            else
+                _mouseLight.RayCount *= 2;
+
+            ShouldRestartRendering = true;
+        }
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.NumpadMinus)
-            _mouseLight.RayCount /= 2;
+        {
+            if (KeyboardInput.ReleasedKey?.Shift ?? false)
+                PathTracer.Bounces -= 1;
+            else
+                _mouseLight.RayCount /= 2;
+
+            ShouldRestartRendering = true;
+        }
 
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Enter)
             Sampler.ResetRender();
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Space)
+            Paused = !Paused;
+
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.R)
+        {
+            _mouseLight.Color = Color.Red;
+            ShouldRestartRendering = true;
+        }
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.G)
+        {
+            _mouseLight.Color = Color.Green;
+            ShouldRestartRendering = true;
+        }
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.B)
+        {
+            _mouseLight.Color = Color.Blue;
+            ShouldRestartRendering = true;
+        }
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.W)
+        {
+            _mouseLight.Color = Color.White;
+            ShouldRestartRendering = true;
+        }
 
 
         if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Q)
@@ -134,6 +189,13 @@ public sealed class MainSection : Section
             else
                 PathTracer.LightSources.Remove(_mouseLight);
         }
+
+
+        if (KeyboardInput.ReleasedKeyCode == Keyboard.Scancode.Backspace)
+        {
+            PathTracer.LightSources.Clear();
+            ShouldRestartRendering = true;
+        }
     }
 
 
@@ -141,9 +203,12 @@ public sealed class MainSection : Section
 
     public override void Draw(IRenderer renderer)
     {
-        RestartRenderingIfRequested();
+        if (!Paused)
+        {
+            RestartRenderingIfRequested();
+            Sampler.RenderNext();
+        }
 
-        Sampler.RenderNext();
         DrawPathTracerAccumulatedSample(renderer);
 
         DrawRaySources(renderer);
@@ -182,11 +247,23 @@ public sealed class MainSection : Section
 
     private void DebugDraw(IRenderer renderer)
     {
+        if (DebugDrawRays)
+            DebugRays(renderer);
+
         if (DebugDrawSegmentLines)
             DebugSegments(renderer);
 
         if (DebugDrawInfo)
             DebugInfo(renderer);
+    }
+
+
+    private void DebugRays(IRenderer renderer)
+    {
+        var intersections = PathTracer.TraceAll();
+
+        foreach (var intersection in intersections)
+            Latte.Debugging.Draw.Line(renderer, intersection.LightRay.Origin, intersection.Point);
     }
 
 
@@ -209,6 +286,8 @@ public sealed class MainSection : Section
             - Creating Image: {Sampler.TimeSpentCreatingImage.TotalMilliseconds:N0}ms
 
             Current Light Source Rays: {_mouseLight.RayCount}
+            Max Bounces: {PathTracer.Bounces}
+            
             Current Sample: {Sampler.CurrentSampleCounter}/{Sampler.Samples} {stateIndicator}
             """;
 

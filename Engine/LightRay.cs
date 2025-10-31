@@ -9,16 +9,13 @@ namespace LightRays.Engine;
 
 
 
-public struct LightRay(Vec2f origin, Vec2f direction, NormalizedColorRGBA? color = null, float startEnergy = 1.0f)
+public struct LightRay(Vec2f origin, Vec2f direction, NormalizedColorRGBA? color = null)
 {
     public Vec2f Origin { get; set; } = origin;
     public Vec2f Direction { get; set; } = direction;
 
 
-    public NormalizedColorRGBA RawColor { get; set; } = color ?? SFML.Graphics.Color.White;
-    public NormalizedColorRGBA Color => RawColor * new NormalizedColorRGBA(Energy, Energy, Energy);
-
-    public float Energy { get; set; } = startEnergy;
+    public NormalizedColorRGBA Color { get; set; } = color ?? SFML.Graphics.Color.White;
 
 
 
@@ -29,12 +26,17 @@ public struct LightRay(Vec2f origin, Vec2f direction, NormalizedColorRGBA? color
 
 
 
-    // TODO: make reflections work
-    public void Reflect(Vec2f normal)
+    public void Reflect(LightRayIntersection intersection)
     {
-        var newDirection = Direction - normal * (2 * Direction.Dot(normal));
+        var segment = intersection.Segment;
+        var normal = segment.NormalOppositeTo(Direction);
 
-        Direction = newDirection;
+        var originDisplacement = normal * 1e-4f;
+
+        Origin = intersection.Point + originDisplacement;
+        Direction -= normal * (float)(2 * Direction.Dot(normal));
+
+        Color = intersection.FinalColor;
     }
 
 
@@ -42,19 +44,21 @@ public struct LightRay(Vec2f origin, Vec2f direction, NormalizedColorRGBA? color
 
     public bool IntersectsSegment(Segment segment, out float t, out float u)
     {
+        const double Epsilon = 1e-7;
+
         var segmentVector = segment.Vector;
         var raySegmentVector = segment.Start - Origin;
 
         var denom = Direction.Cross(segmentVector);
 
-        if (Math.Abs(denom) < 1e-6f)
+        if (Math.Abs(denom) < Epsilon)
         {
             t = u = 0;
             return false;
         }
 
-        t = Vector.Cross(raySegmentVector, segmentVector) / denom;
-        u = Vector.Cross(raySegmentVector, Direction) / denom;
+        t = (float)(Vector.Cross(raySegmentVector, segmentVector) / denom);
+        u = (float)(Vector.Cross(raySegmentVector, Direction) / denom);
 
         return t >= 0.0f && u is >= 0.0f and <= 1.0f;
     }
